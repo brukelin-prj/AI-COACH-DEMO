@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Fitness Coach - 智慧型健康操教練</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Noto+Sans+TC:wght@300;400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- 頂部導覽列 -->
+    <header class="main-header">
+      <div class="logo-section">
+        <span class="pulse-dot"></span>
+        <h1>AI FITNESS COACH</h1>
+        <span class="badge">V2.0 WEB</span>
+      </div>
+      <div class="mode-tabs">
+        <button id="btn-twist" class="tab-btn active" data-mode="twist">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/>
+          </svg>
+          腰部扭轉動作 (Twisting)
+        </button>
+        <button id="btn-squat" class="tab-btn" data-mode="squat">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M19 13H5v-2h14v2z"/>
+          </svg>
+          深蹲動作分析 (Squatting)
+        </button>
+        <button id="btn-sidebend" class="tab-btn" data-mode="sidebend">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.53c-.26-.81-1-1.4-1.9-1.4h-1v-3c0-.55-.45-1-1-1h-6v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+          </svg>
+          體側彎動作 (Side Bend)
+        </button>
+      </div>
+      <div class="status-indicator">
+        <span id="model-status-text">模型載入中...</span>
+        <div id="model-spinner" class="spinner"></div>
+      </div>
+    </header>
+
+    <!-- 主區塊 -->
+    <main class="main-content">
+      <!-- 左側：視訊與繪圖區 -->
+      <section class="video-section">
+        <div class="video-container card">
+          <video id="webcam" autoplay playsinline muted></video>
+          <canvas id="output-canvas"></canvas>
+          <div id="loading-overlay" class="overlay">
+            <div class="spinner-large"></div>
+            <p>正在初始化相機與 AI 模型...</p>
+          </div>
+          <div class="camera-info-badge">
+            <span id="fps-counter">FPS: 0.0</span>
+          </div>
+        </div>
+
+        <!-- 視訊控制面板 -->
+        <div class="controls-card card">
+          <div class="control-group">
+            <button id="btn-toggle-camera" class="btn primary-btn">
+              開啟相機
+            </button>
+            <label class="switch-container">
+              <input type="checkbox" id="chk-mirror" checked>
+              <span class="switch-slider"></span>
+              <span class="switch-label">鏡像畫面</span>
+            </label>
+            <label class="switch-container">
+              <input type="checkbox" id="chk-tts" checked>
+              <span class="switch-slider"></span>
+              <span class="switch-label">語音助教</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- 右側：儀表板數據 -->
+      <section class="dashboard-section">
+        <!-- 核心統計數據卡 -->
+        <div class="stats-grid">
+          <div class="stat-card card glow-blue">
+            <span class="stat-title">運動次數</span>
+            <div id="rep-display" class="stat-value text-glow-blue">0</div>
+            <span id="rep-status" class="stat-sub">Neutral</span>
+          </div>
+          
+          <div class="stat-card card glow-green">
+            <span class="stat-title">動作分數</span>
+            <div id="score-display" class="stat-value text-glow-green">100</div>
+            <div class="progress-bar-container">
+              <div id="score-bar" class="progress-bar" style="width: 100%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 即時偵測指標 -->
+        <div class="metrics-card card">
+          <h3>偵測數據指標</h3>
+          <div class="metrics-list">
+            <!-- 扭腰指標 -->
+            <div class="metric-item twist-only">
+              <span class="metric-label">扭轉角度</span>
+              <div class="metric-value-container">
+                <span id="metric-twist-angle" class="metric-value">0.0°</span>
+                <span class="metric-unit">(目標: 35° - 55°)</span>
+              </div>
+            </div>
+            <div class="metric-item twist-only">
+              <span class="metric-label">肩寬 / 臀寬比例</span>
+              <div class="metric-value-container">
+                <span id="metric-shoulder-hip-ratio" class="metric-value">0.00</span>
+                <span class="metric-unit">(臨界值: 0.70)</span>
+              </div>
+            </div>
+
+            <!-- 深蹲指標 -->
+            <div class="metric-item squat-only hidden">
+              <span class="metric-label">自動方向判定</span>
+              <span id="metric-squat-side" class="metric-value">-</span>
+            </div>
+            <div class="metric-item squat-only hidden">
+              <span class="metric-label">膝蓋夾角</span>
+              <div class="metric-value-container">
+                <span id="metric-knee-angle" class="metric-value">0.0°</span>
+                <span class="metric-unit">(目標: 80° - 100°)</span>
+              </div>
+            </div>
+            <div class="metric-item squat-only hidden">
+              <span class="metric-label">手臂夾角</span>
+              <div class="metric-value-container">
+                <span id="metric-arm-angle" class="metric-value">0.0°</span>
+                <span class="metric-unit">(目標: 80° - 100°)</span>
+              </div>
+            </div>
+            <div class="metric-item squat-only hidden">
+              <span class="metric-label">重心偏移</span>
+              <div class="metric-value-container">
+                <span id="metric-com-offset" class="metric-value">0px</span>
+                <span class="metric-unit">(限制: -30px 內)</span>
+              </div>
+            </div>
+            <!-- 體側彎指標 -->
+            <div class="metric-item sidebend-only hidden">
+              <span class="metric-label">側彎角度</span>
+              <div class="metric-value-container">
+                <span id="metric-sidebend-angle" class="metric-value">0.0°</span>
+                <span class="metric-unit">(目標: 27° - 43°)</span>
+              </div>
+            </div>
+            <div class="metric-item sidebend-only hidden">
+              <span class="metric-label">側彎方向</span>
+              <span id="metric-sidebend-direction" class="metric-value">-</span>
+            </div>
+            <div class="metric-item sidebend-only hidden">
+              <span class="metric-label">骨盆位移 (Hip Shift)</span>
+              <div class="metric-value-container">
+                <span id="metric-sidebend-hip-shift" class="metric-value">0.00</span>
+                <span class="metric-unit">(限制: 0.08 內)</span>
+              </div>
+            </div>
+            <div class="metric-item sidebend-only hidden">
+              <span class="metric-label">手部上舉狀態</span>
+              <span id="metric-sidebend-arm-status" class="metric-value">-</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 即時教練回饋 -->
+        <div class="feedback-card card">
+          <div class="feedback-header">
+            <h3>即時姿態修正建議</h3>
+            <span id="pose-perfect-badge" class="perfect-badge">PERFECT FORM</span>
+          </div>
+          <div id="feedback-list" class="feedback-list">
+            <div class="feedback-placeholder">請開啟相機並站立於畫面前以開始偵測...</div>
+          </div>
+        </div>
+
+        <!-- 動作指導教學 -->
+        <div class="guide-card card">
+          <h3>動作指導方針</h3>
+          <div id="guide-twist" class="guide-content twist-only">
+            <ul>
+              <li><strong>動作重點：</strong>站立姿勢下，雙手插腰或平舉，進行腰部左右扭轉。</li>
+              <li><strong>檢測標準：</strong>扭轉角度需達 35° 以上，且肩膀與骨盆保持水平，膝蓋微彎但不晃動。</li>
+            </ul>
+          </div>
+          <div id="guide-squat" class="guide-content squat-only hidden">
+            <ul>
+              <li><strong>動作重點：</strong><strong>請側身站立</strong>於相機前，雙手平舉進行深蹲動作。</li>
+              <li><strong>檢測標準：</strong>下蹲時大腿與小腿夾角應接近 90°，手臂平行抬高 90°，且重心移至腳跟避免前傾。</li>
+            </ul>
+          </div>
+          <div id="guide-sidebend" class="guide-content sidebend-only hidden">
+            <ul>
+              <li><strong>動作重點：</strong><strong>請正面站立</strong>，雙腳與肩同寬，單手高舉過頭，身體向對側彎曲。</li>
+              <li><strong>檢測標準：</strong>側彎角度需在 27° ~ 43° 之間，上舉的手臂需抬高過頭，且骨盆保持穩定，避免左右晃動。</li>
+              <li><strong>判定方式：</strong>維持完美姿態連續 **15 幀 (約 0.5 秒)** 即可算完成一次。</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
