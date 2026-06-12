@@ -107,7 +107,7 @@ async function initPoseModel() {
     
     poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
       baseOptions: {
-        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
         delegate: "GPU"
       },
       runningMode: "VIDEO",
@@ -275,7 +275,14 @@ function detectionLoop() {
   }
 
   const timestampMs = performance.now();
-  const result = poseLandmarker.detectForVideo(webcamElement, timestampMs);
+  let result = null;
+  if (webcamElement.readyState >= 2 && webcamElement.videoWidth > 0) {
+    try {
+      result = poseLandmarker.detectForVideo(webcamElement, timestampMs);
+    } catch (err) {
+      console.warn("MediaPipe detectForVideo error:", err);
+    }
+  }
   
   // 清除前一幀繪圖
   ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
@@ -289,7 +296,7 @@ function detectionLoop() {
   let currentFeedback = [];
   let currentScore = 100;
 
-  if (result.poseLandmarks && result.poseLandmarks.length > 0) {
+  if (result && result.poseLandmarks && result.poseLandmarks.length > 0) {
     const lm = result.poseLandmarks[0]; // 只抓取第一個人體骨架
     
     if (lm.length >= 29) {
@@ -306,128 +313,146 @@ function detectionLoop() {
         const la = lm[LA_ID];
         const ra = lm[RA_ID];
 
-        const shoulderWidth = Math.abs(rs.x - ls.x);
-        const hipWidth = Math.abs(rh.x - lh.x);
-
-        const currentRatio = shoulderWidth / Math.max(hipWidth, 0.01);
-        const currentAngle = calculateAngleFromRatio(shoulderWidth, hipWidth);
-
-        // 緩衝器平滑化
-        angleBuffer.push(currentAngle);
-        ratioBuffer.push(currentRatio);
-        if (angleBuffer.length > BUFFER_MAX_LEN) angleBuffer.shift();
-        if (ratioBuffer.length > BUFFER_MAX_LEN) ratioBuffer.shift();
-
-        cachedState.avgAngle = angleBuffer.reduce((a, b) => a + b, 0) / angleBuffer.length;
-        cachedState.avgRatio = ratioBuffer.reduce((a, b) => a + b, 0) / ratioBuffer.length;
-
-        // 計算對稱水平度與偏移
-        const shoulderTilt = Math.abs(ls.y - rs.y);
-        const hipTilt = Math.abs(lh.y - rh.y);
-        const bodyShiftX = Math.abs((ls.x + rs.x) / 2 - (lh.x + rh.x) / 2);
-
-        // 雙膝夾角
-        const leftKnee = calculateAngle(lh, lk, la);
-        const rightKnee = calculateAngle(rh, rk, ra);
-        const avgKnee = (leftKnee + rightKnee) / 2;
-
-        const timeSec = Date.now() / 1000;
-
-        // --- 次數計數狀態機 ---
-        if (cachedState.avgRatio < REP_THRESHOLD_RATIO && repState === "neutral") {
-          repState = "twisting";
-          repStatus.textContent = "Twisting";
-          repStatus.style.color = "var(--accent-yellow)";
-          if (timeSec - lastRepTime > 2.0) {
-            speakText("開始扭轉");
+        // 檢查關鍵關節可見度
+        const requiredJoints = [LS_ID, RS_ID, LH_ID, RH_ID, LK_ID, RK_ID, LA_ID, RA_ID];
+        let jointsVisible = true;
+        for (const idx of requiredJoints) {
+          if (!lm[idx] || (lm[idx].visibility !== undefined && lm[idx].visibility < 0.5)) {
+            jointsVisible = false;
+            break;
           }
-        } else if (repState === "twisting" && cachedState.avgRatio > REP_RECOVERY_RATIO) {
-          if (timeSec - lastRepTime > 1.0) {
-            repsCount++;
-            repDisplay.textContent = repsCount;
-            lastRepTime = timeSec;
-            repState = "returning";
-            repStatus.textContent = "Done";
-            repStatus.style.color = "var(--accent-green)";
-            
-            speakText(`第 ${repsCount} 下`);
-            
-            if (cachedState.avgAngle >= 35 && cachedState.avgAngle <= 55) {
-              speakText("完美姿勢");
-            } else {
-              speakText("注意扭轉角度");
+        }
+
+        if (!jointsVisible) {
+          metricTwistAngle.textContent = "-";
+          metricShoulderHipRatio.textContent = "-";
+          currentFeedback.push("關鍵關節（肩膀、臀部）未完全入鏡，請退後調整位置");
+          currentPerfect = false;
+          currentScore = 0;
+        } else {
+          const shoulderWidth = Math.abs(rs.x - ls.x);
+          const hipWidth = Math.abs(rh.x - lh.x);
+
+          const currentRatio = shoulderWidth / Math.max(hipWidth, 0.01);
+          const currentAngle = calculateAngleFromRatio(shoulderWidth, hipWidth);
+
+          // 緩衝器平滑化
+          angleBuffer.push(currentAngle);
+          ratioBuffer.push(currentRatio);
+          if (angleBuffer.length > BUFFER_MAX_LEN) angleBuffer.shift();
+          if (ratioBuffer.length > BUFFER_MAX_LEN) ratioBuffer.shift();
+
+          cachedState.avgAngle = angleBuffer.reduce((a, b) => a + b, 0) / angleBuffer.length;
+          cachedState.avgRatio = ratioBuffer.reduce((a, b) => a + b, 0) / ratioBuffer.length;
+
+          // 計算對稱水平度與偏移
+          const shoulderTilt = Math.abs(ls.y - rs.y);
+          const hipTilt = Math.abs(lh.y - rh.y);
+          const bodyShiftX = Math.abs((ls.x + rs.x) / 2 - (lh.x + rh.x) / 2);
+
+          // 雙膝夾角
+          const leftKnee = calculateAngle(lh, lk, la);
+          const rightKnee = calculateAngle(rh, rk, ra);
+          const avgKnee = (leftKnee + rightKnee) / 2;
+
+          const timeSec = Date.now() / 1000;
+
+          // --- 次數計數狀態機 ---
+          if (cachedState.avgRatio < REP_THRESHOLD_RATIO && repState === "neutral") {
+            repState = "twisting";
+            repStatus.textContent = "Twisting";
+            repStatus.style.color = "var(--accent-yellow)";
+            if (timeSec - lastRepTime > 2.0) {
+              speakText("開始扭轉");
+            }
+          } else if (repState === "twisting" && cachedState.avgRatio > REP_RECOVERY_RATIO) {
+            if (timeSec - lastRepTime > 1.0) {
+              repsCount++;
+              repDisplay.textContent = repsCount;
+              lastRepTime = timeSec;
+              repState = "returning";
+              repStatus.textContent = "Done";
+              repStatus.style.color = "var(--accent-green)";
+              
+              speakText(`第 ${repsCount} 下`);
+              
+              if (cachedState.avgAngle >= 35 && cachedState.avgAngle <= 55) {
+                speakText("完美姿勢");
+              } else {
+                speakText("注意扭轉角度");
+              }
+            }
+          } else if (cachedState.avgRatio > 0.95) {
+            repState = "neutral";
+            repStatus.textContent = "Neutral";
+            repStatus.style.color = "var(--text-secondary)";
+          }
+
+          // --- 評分核心邏輯 ---
+          let scorePart = 0;
+
+          // A. 扭腰角度評分 (40 分)
+          if (cachedState.avgAngle >= 35 && cachedState.avgAngle <= 55) {
+            scorePart += 40;
+          } else if (cachedState.avgAngle < 35) {
+            scorePart += Math.max(0, 40 - (35 - cachedState.avgAngle) * 2.5);
+            currentFeedback.push("請加大腰部扭轉幅度");
+            currentPerfect = false;
+          } else {
+            scorePart += Math.max(0, 40 - (cachedState.avgAngle - 55) * 2.5);
+            currentFeedback.push("扭轉幅度過大，請稍減");
+            currentPerfect = false;
+          }
+
+          // B. 骨盆水平穩定度 (20 分)
+          if (hipTilt < 0.05) {
+            scorePart += 20;
+          } else {
+            scorePart += Math.max(0, 20 - hipTilt * 250);
+            currentFeedback.push("請保持骨盆水平，不要傾斜");
+            currentPerfect = false;
+          }
+
+          // C. 肩膀水平度 (15 分)
+          if (shoulderTilt < 0.05) {
+            scorePart += 15;
+          } else {
+            scorePart += Math.max(0, 15 - shoulderTilt * 250);
+            currentFeedback.push("肩膀傾斜，請兩側維持水平");
+            currentPerfect = false;
+          }
+
+          // D. 膝蓋微彎度 (15 分)
+          if (avgKnee >= 160) {
+            scorePart += 15;
+          } else {
+            scorePart += Math.max(0, 15 - (160 - avgKnee) * 1.5);
+            currentFeedback.push("膝蓋彎曲過深，請稍微直立");
+            currentPerfect = false;
+          }
+
+          // E. 身體中軸穩定度 (10 分)
+          if (bodyShiftX < 0.05) {
+            scorePart += 10;
+          } else {
+            scorePart += Math.max(0, 10 - bodyShiftX * 250);
+            currentFeedback.push("身體請勿左右歪斜晃動");
+            currentPerfect = false;
+          }
+
+          currentScore = Math.round(scorePart);
+
+          // 即時語音提醒
+          if (!currentPerfect && timeSec - lastRepTime > 1.8) {
+            if (currentFeedback.length > 0) {
+              speakText(currentFeedback[0]); // 播報最主要的一項建議
             }
           }
-        } else if (cachedState.avgRatio > 0.95) {
-          repState = "neutral";
-          repStatus.textContent = "Neutral";
-          repStatus.style.color = "var(--text-secondary)";
+
+          // 更新數據看板指標
+          metricTwistAngle.textContent = `${cachedState.avgAngle.toFixed(1)}°`;
+          metricShoulderHipRatio.textContent = cachedState.avgRatio.toFixed(2);
         }
-
-        // --- 評分核心邏輯 ---
-        let scorePart = 0;
-
-        // A. 扭腰角度評分 (40 分)
-        if (cachedState.avgAngle >= 35 && cachedState.avgAngle <= 55) {
-          scorePart += 40;
-        } else if (cachedState.avgAngle < 35) {
-          scorePart += Math.max(0, 40 - (35 - cachedState.avgAngle) * 2.5);
-          currentFeedback.push("請加大腰部扭轉幅度");
-          currentPerfect = false;
-        } else {
-          scorePart += Math.max(0, 40 - (cachedState.avgAngle - 55) * 2.5);
-          currentFeedback.push("扭轉幅度過大，請稍減");
-          currentPerfect = false;
-        }
-
-        // B. 骨盆水平穩定度 (20 分)
-        if (hipTilt < 0.05) {
-          scorePart += 20;
-        } else {
-          scorePart += Math.max(0, 20 - hipTilt * 250);
-          currentFeedback.push("請保持骨盆水平，不要傾斜");
-          currentPerfect = false;
-        }
-
-        // C. 肩膀水平度 (15 分)
-        if (shoulderTilt < 0.05) {
-          scorePart += 15;
-        } else {
-          scorePart += Math.max(0, 15 - shoulderTilt * 250);
-          currentFeedback.push("肩膀傾斜，請兩側維持水平");
-          currentPerfect = false;
-        }
-
-        // D. 膝蓋微彎度 (15 分)
-        if (avgKnee >= 160) {
-          scorePart += 15;
-        } else {
-          scorePart += Math.max(0, 15 - (160 - avgKnee) * 1.5);
-          currentFeedback.push("膝蓋彎曲過深，請稍微直立");
-          currentPerfect = false;
-        }
-
-        // E. 身體中軸穩定度 (10 分)
-        if (bodyShiftX < 0.05) {
-          scorePart += 10;
-        } else {
-          scorePart += Math.max(0, 10 - bodyShiftX * 250);
-          currentFeedback.push("身體請勿左右歪斜晃動");
-          currentPerfect = false;
-        }
-
-        currentScore = Math.round(scorePart);
-
-        // 即時語音提醒
-        if (!currentPerfect && timeSec - lastRepTime > 1.8) {
-          if (currentFeedback.length > 0) {
-            speakText(currentFeedback[0]); // 播報最主要的一項建議
-          }
-        }
-
-        // 更新數據看板指標
-        metricTwistAngle.textContent = `${cachedState.avgAngle.toFixed(1)}°`;
-        metricShoulderHipRatio.textContent = cachedState.avgRatio.toFixed(2);
 
       } else if (activeMode === "squat") {
         // =============== 2. 深蹲動作邏輯 ===============
@@ -456,119 +481,139 @@ function detectionLoop() {
           metricSquatSide.textContent = sideLabel;
           metricSquatSide.style.color = "var(--text-primary)";
 
-          // 取出 2D 關節座標
-          const shoulder = { x: lm[s_idx].x * w, y: lm[s_idx].y * h };
-          const hip = { x: lm[h_idx].x * w, y: lm[h_idx].y * h };
-          const knee = { x: lm[k_idx].x * w, y: lm[k_idx].y * h };
-          const elbow = { x: lm[e_idx].x * w, y: lm[e_idx].y * h };
-          const ankle = { x: lm[a_idx].x * w, y: lm[a_idx].y * h };
-          const wrist = { x: lm[w_idx].x * w, y: lm[w_idx].y * h };
-
-          // 計算角度
-          const kneeAngle = calculateAngle(hip, knee, ankle);
-          const armAngle = calculateAngle(shoulder, elbow, wrist);
-
-          // 計算重心偏離度 (以腳踝與臀部的水平差距計算)
-          let centerOffset = 0;
-          let centerOk = true;
-
-          if (sideLabel.includes("面向右")) {
-            centerOffset = ankle.x - hip.x;
-          } else {
-            centerOffset = hip.x - ankle.x;
+          // 檢查關鍵關節可見度
+          const requiredJoints = [s_idx, h_idx, k_idx, a_idx, e_idx, w_idx];
+          let jointsVisible = true;
+          for (const idx of requiredJoints) {
+            if (!lm[idx] || (lm[idx].visibility !== undefined && lm[idx].visibility < 0.5)) {
+              jointsVisible = false;
+              break;
+            }
           }
 
-          const timeSec = Date.now() / 1000;
+          if (!jointsVisible) {
+            metricKneeAngle.textContent = "-";
+            metricArmAngle.textContent = "-";
+            metricComOffset.textContent = "-";
+            metricComOffset.style.color = "var(--text-secondary)";
+            currentFeedback.push("關鍵關節（膝蓋、腳踝）未完全入鏡，請退後使全身入鏡");
+            currentPerfect = false;
+            currentScore = 0;
+          } else {
+            // 取出 2D 關節座標
+            const shoulder = { x: lm[s_idx].x * w, y: lm[s_idx].y * h };
+            const hip = { x: lm[h_idx].x * w, y: lm[h_idx].y * h };
+            const knee = { x: lm[k_idx].x * w, y: lm[k_idx].y * h };
+            const elbow = { x: lm[e_idx].x * w, y: lm[e_idx].y * h };
+            const ankle = { x: lm[a_idx].x * w, y: lm[a_idx].y * h };
+            const wrist = { x: lm[w_idx].x * w, y: lm[w_idx].y * h };
 
-          // --- 深蹲次數計數狀態機 ---
-          // 下蹲達標閥值 (膝蓋夾角小於 110 度進入深蹲區)
-          if (kneeAngle < 110 && repState === "neutral") {
-            repState = "squatting";
-            repStatus.textContent = "Squatting";
-            repStatus.style.color = "var(--accent-yellow)";
-            if (timeSec - lastRepTime > 2.0) {
-              speakText("向下深蹲");
+            // 計算角度
+            const kneeAngle = calculateAngle(hip, knee, ankle);
+            const armAngle = calculateAngle(shoulder, elbow, wrist);
+
+            // 計算重心偏離度 (以腳踝與臀部的水平差距計算)
+            let centerOffset = 0;
+            let centerOk = true;
+
+            if (sideLabel.includes("面向右")) {
+              centerOffset = ankle.x - hip.x;
+            } else {
+              centerOffset = hip.x - ankle.x;
             }
-          } else if (repState === "squatting" && kneeAngle > 150) {
-            // 站立起身大於 150 度完成一次
-            if (timeSec - lastRepTime > 1.0) {
-              repsCount++;
-              repDisplay.textContent = repsCount;
-              lastRepTime = timeSec;
-              repState = "returning";
-              repStatus.textContent = "Done";
-              repStatus.style.color = "var(--accent-green)";
-              
-              speakText(`第 ${repsCount} 下`);
-              
-              if (Math.abs(kneeAngle - SQUAT_TARGET_ANGLE) <= SQUAT_ANGLE_TOLERANCE) {
-                speakText("深蹲標準");
-              } else {
-                speakText("起立，注意下蹲深度");
+
+            const timeSec = Date.now() / 1000;
+
+            // --- 深蹲次數計數狀態機 ---
+            // 下蹲達標閥值 (膝蓋夾角小於 110 度進入深蹲區)
+            if (kneeAngle < 110 && repState === "neutral") {
+              repState = "squatting";
+              repStatus.textContent = "Squatting";
+              repStatus.style.color = "var(--accent-yellow)";
+              if (timeSec - lastRepTime > 2.0) {
+                speakText("向下深蹲");
+              }
+            } else if (repState === "squatting" && kneeAngle > 150) {
+              // 站立起身大於 150 度完成一次
+              if (timeSec - lastRepTime > 1.0) {
+                repsCount++;
+                repDisplay.textContent = repsCount;
+                lastRepTime = timeSec;
+                repState = "returning";
+                repStatus.textContent = "Done";
+                repStatus.style.color = "var(--accent-green)";
+                
+                speakText(`第 ${repsCount} 下`);
+                
+                if (Math.abs(kneeAngle - SQUAT_TARGET_ANGLE) <= SQUAT_TARGET_ANGLE_TOLERANCE) {
+                  speakText("深蹲標準");
+                } else {
+                  speakText("起立，注意下蹲深度");
+                }
+              }
+            } else if (kneeAngle > 150) {
+              repState = "neutral";
+              repStatus.textContent = "Neutral";
+              repStatus.style.color = "var(--text-secondary)";
+            }
+
+            // --- 深蹲評分標準 (滿分 100) ---
+            let squatScore = 100;
+
+            // 1. 膝關節深蹲深度評分 (40 分)
+            if (Math.abs(kneeAngle - SQUAT_TARGET_ANGLE) <= SQUAT_ANGLE_TOLERANCE) {
+              // 角度落在 75 ~ 105 度間
+            } else if (kneeAngle < 75) {
+              squatScore -= Math.min(25, (75 - kneeAngle) * 1.5);
+              currentFeedback.push("下蹲過深，膝蓋壓力較大");
+              currentPerfect = false;
+            } else {
+              squatScore -= Math.min(30, (kneeAngle - 105) * 1.5);
+              currentFeedback.push("下蹲深度不足，請蹲低一點");
+              currentPerfect = false;
+            }
+
+            // 2. 手臂平舉平平行度評分 (30 分)
+            if (Math.abs(armAngle - 90) <= 20) {
+              // 70 ~ 110 度間
+            } else if (armAngle < 70) {
+              squatScore -= 15;
+              currentFeedback.push("雙手請向上平舉平行地面");
+              currentPerfect = false;
+            } else {
+              squatScore -= 15;
+              currentFeedback.push("手臂抬起過高");
+              currentPerfect = false;
+            }
+
+            // 3. 重心偏移評分 (30 分)
+            if (centerOffset < -COM_TOLERANCE_PX) {
+              centerOk = false;
+              squatScore -= 20;
+              currentFeedback.push("重心太靠前，請移向後腳跟");
+              currentPerfect = false;
+            } else if (centerOffset > w * 0.22) {
+              centerOk = false;
+              squatScore -= 20;
+              currentFeedback.push("重心太靠後，請稍微往前移");
+              currentPerfect = false;
+            }
+
+            currentScore = Math.max(0, squatScore);
+
+            // 即時語音提醒
+            if (!currentPerfect && timeSec - lastRepTime > 1.8) {
+              if (currentFeedback.length > 0) {
+                speakText(currentFeedback[0]);
               }
             }
-          } else if (kneeAngle > 150) {
-            repState = "neutral";
-            repStatus.textContent = "Neutral";
-            repStatus.style.color = "var(--text-secondary)";
+
+            // 更新數據看板指標
+            metricKneeAngle.textContent = `${Math.round(kneeAngle)}°`;
+            metricArmAngle.textContent = `${Math.round(armAngle)}°`;
+            metricComOffset.textContent = `${Math.round(centerOffset)}px`;
+            metricComOffset.style.color = centerOk ? "var(--text-primary)" : "var(--accent-red)";
           }
-
-          // --- 深蹲評分標準 (滿分 100) ---
-          let squatScore = 100;
-
-          // 1. 膝關節深蹲深度評分 (40 分)
-          if (Math.abs(kneeAngle - SQUAT_TARGET_ANGLE) <= SQUAT_ANGLE_TOLERANCE) {
-            // 角度落在 75 ~ 105 度間
-          } else if (kneeAngle < 75) {
-            squatScore -= Math.min(25, (75 - kneeAngle) * 1.5);
-            currentFeedback.push("下蹲過深，膝蓋壓力較大");
-            currentPerfect = false;
-          } else {
-            squatScore -= Math.min(30, (kneeAngle - 105) * 1.5);
-            currentFeedback.push("下蹲深度不足，請蹲低一點");
-            currentPerfect = false;
-          }
-
-          // 2. 手臂平舉平平行度評分 (30 分)
-          if (Math.abs(armAngle - 90) <= 20) {
-            // 70 ~ 110 度間
-          } else if (armAngle < 70) {
-            squatScore -= 15;
-            currentFeedback.push("雙手請向上平舉平行地面");
-            currentPerfect = false;
-          } else {
-            squatScore -= 15;
-            currentFeedback.push("手臂抬起過高");
-            currentPerfect = false;
-          }
-
-          // 3. 重心偏移評分 (30 分)
-          if (centerOffset < -COM_TOLERANCE_PX) {
-            centerOk = false;
-            squatScore -= 20;
-            currentFeedback.push("重心太靠前，請移向後腳跟");
-            currentPerfect = false;
-          } else if (centerOffset > w * 0.22) {
-            centerOk = false;
-            squatScore -= 20;
-            currentFeedback.push("重心太靠後，請稍微往前移");
-            currentPerfect = false;
-          }
-
-          currentScore = Math.max(0, squatScore);
-
-          // 即時語音提醒
-          if (!currentPerfect && timeSec - lastRepTime > 1.8) {
-            if (currentFeedback.length > 0) {
-              speakText(currentFeedback[0]);
-            }
-          }
-
-          // 更新數據看板指標
-          metricKneeAngle.textContent = `${Math.round(kneeAngle)}°`;
-          metricArmAngle.textContent = `${Math.round(armAngle)}°`;
-          metricComOffset.textContent = `${Math.round(centerOffset)}px`;
-          metricComOffset.style.color = centerOk ? "var(--text-primary)" : "var(--accent-red)";
         }
       } else if (activeMode === "sidebend") {
         // =============== 3. 體側彎動作邏輯 ===============
@@ -583,151 +628,171 @@ function detectionLoop() {
         const lw = lm[LW_ID];
         const rw = lm[RW_ID];
 
-        // 計算肩膀中心、髖部中心、雙踝中心
-        const shoulderCenter = {
-          x: (ls.x + rs.x) / 2,
-          y: (ls.y + rs.y) / 2,
-          z: (ls.z + rs.z) / 2
-        };
-        const hipCenter = {
-          x: (lh.x + rh.x) / 2,
-          y: (lh.y + rh.y) / 2
-        };
-        const feetCenter = {
-          x: (la.x + ra.x) / 2,
-          y: (la.y + ra.y) / 2
-        };
-
-        // 側彎傾斜角度
-        const dx = shoulderCenter.x - hipCenter.x;
-        const dy = shoulderCenter.y - hipCenter.y; // 由於肩膀在上方，dy 為負數
-        const bendAngle = Math.atan2(Math.abs(dx), Math.abs(dy)) * (180.0 / Math.PI);
-
-        // 側彎方向判定
-        let bendDirection = "直立";
-        if (bendAngle >= 10) {
-          bendDirection = dx > 0 ? "向右側彎" : "向左側彎";
-        }
-
-        // 髖部左右偏移 (Hip Shift)
-        const hipShift = Math.abs(hipCenter.x - feetCenter.x);
-
-        // 身體前傾/扭轉檢測 (使用左右肩深度座標差值)
-        const shoulderZDiff = Math.abs(ls.z - rs.z);
-
-        // 手部上舉判定
-        let armStatus = "未上舉";
-        let isArmRaised = false;
-
-        if (bendDirection === "向右側彎") {
-          // 向右側彎時，左臂應上舉高於左肩
-          if (lw.y < ls.y) {
-            armStatus = "左手已上舉";
-            isArmRaised = true;
-          } else {
-            armStatus = "左手未抬高";
-          }
-        } else if (bendDirection === "向左側彎") {
-          // 向左側彎時，右臂應上舉高於右肩
-          if (rw.y < rs.y) {
-            armStatus = "右手已上舉";
-            isArmRaised = true;
-          } else {
-            armStatus = "右手未抬高";
+        // 檢查關鍵關節可見度
+        const requiredJoints = [LS_ID, RS_ID, LH_ID, RH_ID, LA_ID, RA_ID, LW_ID, RW_ID];
+        let jointsVisible = true;
+        for (const idx of requiredJoints) {
+          if (!lm[idx] || (lm[idx].visibility !== undefined && lm[idx].visibility < 0.5)) {
+            jointsVisible = false;
+            break;
           }
         }
 
-        const timeSec = Date.now() / 1000;
-
-        // --- 評分機制 (滿分 100) ---
-        let sidebendScore = 100;
-
-        // A. 側彎角度檢測 (40 分)
-        if (bendAngle >= 27 && bendAngle <= 43) {
-          // 合格
-        } else if (bendAngle < 27) {
-          if (bendAngle >= 10) {
-            sidebendScore -= Math.min(30, (27 - bendAngle) * 2.5);
-            currentFeedback.push("請再側彎一點");
-          } else {
-            sidebendScore -= 40;
-            currentFeedback.push("請左右傾斜身體進行體側彎");
-          }
+        if (!jointsVisible) {
+          metricSidebendAngle.textContent = "-";
+          metricSidebendDirection.textContent = "-";
+          metricSidebendHipShift.textContent = "-";
+          metricSidebendArmStatus.textContent = "-";
+          currentFeedback.push("關鍵關節（肩膀、臀部、腳踝）未完全入鏡，請退後使全身入鏡");
           currentPerfect = false;
+          currentScore = 0;
         } else {
-          sidebendScore -= Math.min(30, (bendAngle - 43) * 2.5);
-          currentFeedback.push("側彎角度過大，請稍回正");
-          currentPerfect = false;
-        }
+          // 計算肩膀中心、髖部中心、雙踝中心
+          const shoulderCenter = {
+            x: (ls.x + rs.x) / 2,
+            y: (ls.y + rs.y) / 2,
+            z: (ls.z + rs.z) / 2
+          };
+          const hipCenter = {
+            x: (lh.x + rh.x) / 2,
+            y: (lh.y + rh.y) / 2
+          };
+          const feetCenter = {
+            x: (la.x + ra.x) / 2,
+            y: (la.y + ra.y) / 2
+          };
 
-        // B. 手部上舉檢測 (25 分)
-        if (bendDirection !== "直立") {
-          if (isArmRaised) {
+          // 側彎傾斜角度
+          const dx = shoulderCenter.x - hipCenter.x;
+          const dy = shoulderCenter.y - hipCenter.y; // 由於肩膀在上方，dy 為負數
+          const bendAngle = Math.atan2(Math.abs(dx), Math.abs(dy)) * (180.0 / Math.PI);
+
+          // 側彎方向判定
+          let bendDirection = "直立";
+          if (bendAngle >= 10) {
+            bendDirection = dx > 0 ? "向右側彎" : "向左側彎";
+          }
+
+          // 髖部左右偏移 (Hip Shift)
+          const hipShift = Math.abs(hipCenter.x - feetCenter.x);
+
+          // 身體前傾/扭轉檢測 (使用左右肩深度座標差值)
+          const shoulderZDiff = Math.abs(ls.z - rs.z);
+
+          // 手部上舉判定
+          let armStatus = "未上舉";
+          let isArmRaised = false;
+
+          if (bendDirection === "向右側彎") {
+            // 向右側彎時，左臂應上舉高於左肩
+            if (lw.y < ls.y) {
+              armStatus = "左手已上舉";
+              isArmRaised = true;
+            } else {
+              armStatus = "左手未抬高";
+            }
+          } else if (bendDirection === "向左側彎") {
+            // 向左側彎時，右臂應上舉高於右肩
+            if (rw.y < rs.y) {
+              armStatus = "右手已上舉";
+              isArmRaised = true;
+            } else {
+              armStatus = "右手未抬高";
+            }
+          }
+
+          const timeSec = Date.now() / 1000;
+
+          // --- 評分機制 (滿分 100) ---
+          let sidebendScore = 100;
+
+          // A. 側彎角度檢測 (40 分)
+          if (bendAngle >= 27 && bendAngle <= 43) {
             // 合格
+          } else if (bendAngle < 27) {
+            if (bendAngle >= 10) {
+              sidebendScore -= Math.min(30, (27 - bendAngle) * 2.5);
+              currentFeedback.push("請再側彎一點");
+            } else {
+              sidebendScore -= 40;
+              currentFeedback.push("請左右傾斜身體進行體側彎");
+            }
+            currentPerfect = false;
           } else {
-            sidebendScore -= 25;
-            currentFeedback.push(bendDirection === "向右側彎" ? "請將左手高舉過頭" : "請將右手高舉過頭");
+            sidebendScore -= Math.min(30, (bendAngle - 43) * 2.5);
+            currentFeedback.push("側彎角度過大，請稍回正");
             currentPerfect = false;
           }
-        } else {
-          sidebendScore -= 10;
-        }
 
-        // C. 骨盆移動穩定性 (20 分)
-        if (hipShift < 0.08) {
-          // 合格
-        } else {
-          sidebendScore -= 20;
-          currentFeedback.push("骨盆請維持置中，不要左右晃動");
-          currentPerfect = false;
-        }
-
-        // D. 身體前傾防旋轉檢測 (15 分)
-        if (shoulderZDiff < 0.12) {
-          // 合格
-        } else {
-          sidebendScore -= 15;
-          currentFeedback.push("胸口請正對鏡頭，不要扭轉前傾");
-          currentPerfect = false;
-        }
-
-        currentScore = Math.max(0, sidebendScore);
-
-        // --- 15 幀穩定達標次數累計 ---
-        const isPoseCorrect = currentScore >= 85 && (bendAngle >= 27 && bendAngle <= 43);
-
-        if (isPoseCorrect && isCameraActive) {
-          stableFrames++;
-          repStatus.textContent = `Hold: ${stableFrames}/15`;
-          repStatus.style.color = "var(--accent-yellow)";
-
-          if (stableFrames === 15) {
-            repsCount++;
-            repDisplay.textContent = repsCount;
-            repStatus.textContent = "PASS";
-            repStatus.style.color = "var(--accent-green)";
-            speakText(`側彎達標，第 ${repsCount} 下`);
-          } else if (stableFrames > 15 && stableFrames % 30 === 0) {
-            speakText("非常好，保持住");
+          // B. 手部上舉檢測 (25 分)
+          if (bendDirection !== "直立") {
+            if (isArmRaised) {
+              // 合格
+            } else {
+              sidebendScore -= 25;
+              currentFeedback.push(bendDirection === "向右側彎" ? "請將左手高舉過頭" : "請將右手高舉過頭");
+              currentPerfect = false;
+            }
+          } else {
+            sidebendScore -= 10;
           }
-        } else {
-          stableFrames = 0;
-          repStatus.textContent = bendDirection;
-          repStatus.style.color = "var(--text-secondary)";
-        }
 
-        // 即時語音矯正播報 (非維持狀態下)
-        if (!currentPerfect && timeSec - lastRepTime > 2.0 && stableFrames === 0) {
-          if (currentFeedback.length > 0) {
-            speakText(currentFeedback[0]);
+          // C. 骨盆移動穩定性 (20 分)
+          if (hipShift < 0.08) {
+            // 合格
+          } else {
+            sidebendScore -= 20;
+            currentFeedback.push("骨盆請維持置中，不要左右晃動");
+            currentPerfect = false;
           }
-        }
 
-        // 更新指標元件數據
-        metricSidebendAngle.textContent = `${bendAngle.toFixed(1)}°`;
-        metricSidebendDirection.textContent = bendDirection;
-        metricSidebendHipShift.textContent = hipShift.toFixed(2);
-        metricSidebendArmStatus.textContent = armStatus;
+          // D. 身體前傾防旋轉檢測 (15 分)
+          if (shoulderZDiff < 0.12) {
+            // 合格
+          } else {
+            sidebendScore -= 15;
+            currentFeedback.push("胸口請正對鏡頭，不要扭轉前傾");
+            currentPerfect = false;
+          }
+
+          currentScore = Math.max(0, sidebendScore);
+
+          // --- 15 幀穩定達標次數累計 ---
+          const isPoseCorrect = currentScore >= 85 && (bendAngle >= 27 && bendAngle <= 43);
+
+          if (isPoseCorrect && isCameraActive) {
+            stableFrames++;
+            repStatus.textContent = `Hold: ${stableFrames}/15`;
+            repStatus.style.color = "var(--accent-yellow)";
+
+            if (stableFrames === 15) {
+              repsCount++;
+              repDisplay.textContent = repsCount;
+              repStatus.textContent = "PASS";
+              repStatus.style.color = "var(--accent-green)";
+              speakText(`側彎達標，第 ${repsCount} 下`);
+            } else if (stableFrames > 15 && stableFrames % 30 === 0) {
+              speakText("非常好，保持住");
+            }
+          } else {
+            stableFrames = 0;
+            repStatus.textContent = bendDirection;
+            repStatus.style.color = "var(--text-secondary)";
+          }
+
+          // 即時語音矯正播報 (非維持狀態下)
+          if (!currentPerfect && timeSec - lastRepTime > 2.0 && stableFrames === 0) {
+            if (currentFeedback.length > 0) {
+              speakText(currentFeedback[0]);
+            }
+          }
+
+          // 更新指標元件數據
+          metricSidebendAngle.textContent = `${bendAngle.toFixed(1)}°`;
+          metricSidebendDirection.textContent = bendDirection;
+          metricSidebendHipShift.textContent = hipShift.toFixed(2);
+          metricSidebendArmStatus.textContent = armStatus;
+        }
       }
 
       cachedState.score = currentScore;
