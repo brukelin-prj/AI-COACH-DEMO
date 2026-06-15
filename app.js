@@ -843,7 +843,7 @@ function updateDashboardUI() {
     feedbackList.innerHTML = `<div class="feedback-placeholder">未偵測到人體 skeleton，請站入鏡頭中央...</div>`;
   } else if (cachedState.feedback.length === 0) {
     feedbackList.innerHTML = `
-      <div class="feedback-alert" style="background-color: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.2); color: #a7f3d0;">
+      <div class="feedback-alert success" style="background-color: rgba(43, 107, 62, 0.08); border: 1.5px solid var(--vintage-green); color: var(--vintage-green);">
         姿態相當完美，請繼續保持！
       </div>
     `;

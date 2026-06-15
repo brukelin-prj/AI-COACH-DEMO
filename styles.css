@@ -1,20 +1,31 @@
-/* CSS 變數定義 - 建立現代化的高質感色彩系統 */
+/* ================= 復古設計與色彩系統 ================= */
 :root {
-  --bg-color: #080b11;
-  --panel-bg: rgba(17, 22, 37, 0.7);
-  --panel-border: rgba(255, 255, 255, 0.06);
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --accent-blue: #2563eb;
-  --accent-blue-glow: rgba(37, 99, 235, 0.4);
-  --accent-green: #10b981;
-  --accent-green-glow: rgba(16, 185, 129, 0.4);
-  --accent-red: #ef4444;
-  --accent-red-glow: rgba(239, 68, 68, 0.4);
-  --accent-yellow: #f59e0b;
+  --vintage-paper: #f4edd9;
+  --vintage-ink: #19385c;
+  --vintage-red: #a82a25;
+  --vintage-red-glow: rgba(168, 42, 37, 0.2);
+  --vintage-yellow: #d3962b;
+  --vintage-green: #2b6b3e;
+  --vintage-green-glow: rgba(43, 107, 62, 0.2);
+  
+  --bg-color: var(--vintage-paper);
+  --panel-bg: #fcfaf2;
+  --panel-border: var(--vintage-ink);
+  --text-primary: var(--vintage-ink);
+  --text-secondary: rgba(25, 56, 92, 0.7);
+  --accent-blue: var(--vintage-ink);
+  --accent-blue-glow: rgba(25, 56, 92, 0.15);
+  --accent-green: var(--vintage-green);
+  --accent-green-glow: var(--vintage-green-glow);
+  --accent-red: var(--vintage-red);
+  --accent-red-glow: var(--vintage-red-glow);
+  --accent-yellow: var(--vintage-yellow);
   --font-family: 'Outfit', 'Noto Sans TC', sans-serif;
-  --shadow-lg: 0 10px 30px -10px rgba(0, 0, 0, 0.7);
-  --glass-glow: inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+  
+  --shadow-lg: 4px 4px 0px 0px var(--vintage-ink);
+  --shadow-retro: 4px 4px 0px 0px var(--vintage-ink);
+  --shadow-retro-small: 2px 2px 0px 0px var(--vintage-ink);
+  --glass-glow: none;
 }
 
 /* 基本樣式與重設 */
@@ -30,9 +41,21 @@ body {
   font-family: var(--font-family);
   min-height: 100vh;
   overflow-x: hidden;
+}
+
+/* 復古手稿格線背景 */
+.vintage-grid-bg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
   background-image: 
-    radial-gradient(circle at 10% 20%, rgba(37, 99, 235, 0.08) 0%, transparent 40%),
-    radial-gradient(circle at 90% 80%, rgba(16, 185, 129, 0.08) 0%, transparent 40%);
+    linear-gradient(rgba(25, 56, 92, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(25, 56, 92, 0.05) 1px, transparent 1px);
+  background-size: 24px 24px;
+  z-index: -10;
+  pointer-events: none;
 }
 
 .app-container {
@@ -52,11 +75,9 @@ body {
   align-items: center;
   padding: 15px 25px;
   background: var(--panel-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--panel-border);
+  border: 2.5px solid var(--panel-border);
   box-shadow: var(--shadow-lg);
-  border-radius: 16px;
+  border-radius: 12px;
   z-index: 10;
 }
 
@@ -122,9 +143,10 @@ body {
 }
 
 .tab-btn.active {
-  background: var(--accent-blue);
+  background: var(--vintage-yellow);
   color: #fff;
-  box-shadow: 0 4px 12px var(--accent-blue-glow);
+  border: 2px solid var(--vintage-ink);
+  box-shadow: 2px 2px 0px 0px var(--vintage-ink);
 }
 
 .status-indicator {
@@ -139,8 +161,8 @@ body {
 .spinner {
   width: 16px;
   height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.1);
-  border-top-color: var(--accent-blue);
+  border: 2px solid rgba(25, 56, 92, 0.2);
+  border-top-color: var(--vintage-ink);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -152,13 +174,11 @@ body {
 /* 卡片與玻璃設計系統 */
 .card {
   background: var(--panel-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--panel-border);
-  box-shadow: var(--shadow-lg), var(--glass-glow);
-  border-radius: 20px;
+  border: 2.5px solid var(--panel-border);
+  box-shadow: var(--shadow-lg);
+  border-radius: 12px;
   padding: 20px;
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 /* 主頁面版面配置 */
@@ -472,9 +492,9 @@ body {
   justify-content: space-between;
   align-items: center;
   padding: 12px 18px;
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.02);
+  background: rgba(25, 56, 92, 0.04);
+  border-radius: 8px;
+  border: 1.5px solid var(--vintage-ink);
 }
 
 .metric-label {
@@ -562,9 +582,9 @@ body {
 }
 
 .feedback-alert.warning {
-  background-color: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  color: #fca5a5;
+  background-color: rgba(168, 42, 37, 0.08);
+  border: 1.5px solid var(--vintage-red);
+  color: var(--vintage-red);
 }
 
 .feedback-alert.warning::before {
